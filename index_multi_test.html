@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>CustomPacksFPV Battery Test Results</title>
+
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.45;
+    }
+
+    .wrap {
+      width: min(1100px, calc(100% - 28px));
+      margin: 28px auto 60px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: clamp(28px, 5vw, 46px);
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      margin: 16px 0;
+    }
+
+    .spec-grid, .result-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 12px;
+    }
+
+    .item {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      min-height: 76px;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .value {
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .chart {
+      width: 100%;
+      height: 430px;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    .error {
+      color: #ff7b72;
+      white-space: pre-wrap;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    footer {
+      margin-top: 26px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 650px) {
+      .chart { height: 340px; }
+      .wrap { width: min(100% - 18px, 1100px); }
+    }
+  </style>
+</head>
+
+<body>
+<div class="wrap">
+  <h1>CustomPacksFPV</h1>
+  <div class="subtitle">Individual battery test results — <span id="testLabel"></span></div>
+
+  <div class="card">
+    <h2>Pack details</h2>
+    <div class="spec-grid" id="specGrid"></div>
+  </div>
+
+  <div class="card">
+    <h2>Measured results</h2>
+    <div class="result-grid" id="resultGrid">
+      <div class="item"><div class="label">Status</div><div class="value">Loading test.csv…</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Voltage</h2>
+    <div id="voltageChart" class="chart"></div>
+  </div>
+
+  <div class="card">
+    <h2>Current</h2>
+    <div id="currentChart" class="chart"></div>
+  </div>
+
+  <div class="card">
+    <h2>Power</h2>
+    <div id="powerChart" class="chart"></div>
+  </div>
+
+  <div class="card">
+    <h2>Temperature</h2>
+    <div id="tempChart" class="chart"></div>
+  </div>
+
+  <div class="card">
+    <h2>Raw data</h2>
+    <p><a id="csvDownload" href="#" download>Download raw CSV</a></p>
+    <p class="small">Graphs and measured values on this page are generated directly from the uploaded ATORCH CSV.</p>
+  </div>
+
+  <div id="errorBox" class="card error" style="display:none"></div>
+
+  <footer>CustomPacksFPV battery test record</footer>
+</div>
+
+<script>
+/*
+  EDIT ONLY THIS SECTION FOR EACH BATTERY.
+  Everything under "Measured results" is calculated automatically from test.csv.
+*/
+const params = new URLSearchParams(window.location.search);
+const testName = (params.get("test") || "test").replace(/[^a-zA-Z0-9._-]/g, "");
+const csvFile = testName.toLowerCase().endsWith(".csv") ? testName : `${testName}.csv`;
+
+const PACK = {
+  packId: "CP-0001",
+  cell: "Ampace JP40",
+  configuration: "6S3P",
+  ratedCapacity: "12,000 mAh",
+  nominalVoltage: "21.6 V",
+  nominalEnergy: "259 Wh",
+  continuousDischarge: "80 A",
+  chargeVoltage: "25.2 V",
+  notes: "50 A discharge test"
+};
+
+function addSpec(label, value) {
+  if (!value) return "";
+  return `<div class="item"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+}
+
+document.title = `CustomPacksFPV - ${testName}`;
+document.getElementById("testLabel").textContent = testName;
+document.getElementById("csvDownload").href = csvFile;
+document.getElementById("csvDownload").setAttribute("download", csvFile);
+
+document.getElementById("specGrid").innerHTML =
+  addSpec("Pack ID", PACK.packId) +
+  addSpec("Cell", PACK.cell) +
+  addSpec("Configuration", PACK.configuration) +
+  addSpec("Rated capacity", PACK.ratedCapacity) +
+  addSpec("Nominal voltage", PACK.nominalVoltage) +
+  addSpec("Nominal energy", PACK.nominalEnergy) +
+  addSpec("Continuous discharge", PACK.continuousDischarge) +
+  addSpec("Charge voltage", PACK.chargeVoltage);
+
+function parseCSVLine(line) {
+  // ATORCH files used here do not contain quoted commas in data fields.
+  return line.split(",").map(v => v.trim());
+}
+
+function number(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function fmt(n, digits = 2) {
+  return Number.isFinite(n) ? n.toFixed(digits) : "—";
+}
+
+function max(arr) {
+  const clean = arr.filter(Number.isFinite);
+  return clean.length ? Math.max(...clean) : NaN;
+}
+
+function min(arr) {
+  const clean = arr.filter(Number.isFinite);
+  return clean.length ? Math.min(...clean) : NaN;
+}
+
+function renderResult(label, value) {
+  return `<div class="item"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+}
+
+const plotConfig = {
+  responsive: true,
+  displaylogo: false,
+  scrollZoom: true
+};
+
+function baseLayout(yTitle) {
+  return {
+    paper_bgcolor: "#161b22",
+    plot_bgcolor: "#161b22",
+    font: {color: "#e6edf3"},
+    margin: {l: 64, r: 22, t: 15, b: 58},
+    xaxis: {
+      title: "Elapsed time (min)",
+      gridcolor: "#30363d",
+      zerolinecolor: "#30363d"
+    },
+    yaxis: {
+      title: yTitle,
+      gridcolor: "#30363d",
+      zerolinecolor: "#30363d"
+    },
+    hovermode: "x unified",
+    legend: {orientation: "h", y: 1.08}
+  };
+}
+
+async function loadTest() {
+  try {
+    const res = await fetch(csvFile, {cache: "no-store"});
+    if (!res.ok) throw new Error(`Could not load test.csv (HTTP ${res.status}).`);
+
+    const text = await res.text();
+    const lines = text.split(/\r?\n/).filter(line => line.trim().length);
+
+    // Find the ATORCH header row, rather than assuming exactly 3 preamble lines.
+    const headerIndex = lines.findIndex(line =>
+      line.includes("DATE") &&
+      line.includes("VOLTAGE") &&
+      line.includes("CURRENT")
+    );
+
+    if (headerIndex < 0) {
+      throw new Error("ATORCH CSV header was not found.");
+    }
+
+    const header = parseCSVLine(lines[headerIndex]);
+
+    const findCol = (...terms) => {
+      return header.findIndex(h => terms.every(t => h.toUpperCase().includes(t)));
+    };
+
+    const idx = {
+      date: findCol("DATE"),
+      voltage: findCol("VOLTAGE"),
+      current: findCol("CURRENT"),
+      power: findCol("POWER"),
+      wh: findCol("E_QUANTITY"),
+      mah: findCol("E_CAPACITY"),
+      ntc: findCol("NTC_TEMP"),
+      cpu: findCol("CPU_TEMP"),
+      mos: findCol("MOS_TEMP")
+    };
+
+    if ([idx.date, idx.voltage, idx.current, idx.power].some(i => i < 0)) {
+      throw new Error("Required ATORCH columns were not found.");
+    }
+
+    const rows = [];
+    for (let i = headerIndex + 1; i < lines.length; i++) {
+      const p = parseCSVLine(lines[i]);
+      if (!p[idx.date]) continue;
+
+      const dateText = p[idx.date].replace("_", "T");
+      const date = new Date(dateText);
+      const voltage = number(p[idx.voltage]);
+      const current = number(p[idx.current]);
+      const power = number(p[idx.power]);
+
+      if (!Number.isFinite(date.getTime()) || voltage === null || current === null || power === null) {
+        continue;
+      }
+
+      rows.push({
+        date,
+        voltage,
+        current,
+        power,
+        wh: idx.wh >= 0 ? number(p[idx.wh]) : null,
+        mah: idx.mah >= 0 ? number(p[idx.mah]) : null,
+        ntc: idx.ntc >= 0 ? number(p[idx.ntc]) : null,
+        cpu: idx.cpu >= 0 ? number(p[idx.cpu]) : null,
+        mos: idx.mos >= 0 ? number(p[idx.mos]) : null
+      });
+    }
+
+    if (rows.length < 2) {
+      throw new Error("Not enough valid data rows were found.");
+    }
+
+    const t0 = rows[0].date.getTime();
+    rows.forEach(r => r.tMin = (r.date.getTime() - t0) / 60000);
+
+    const t = rows.map(r => r.tMin);
+    const voltage = rows.map(r => r.voltage);
+
+    // ATORCH reports discharge current as negative. Display discharge magnitude as positive.
+    const dischargeCurrent = rows.map(r => Math.abs(r.current));
+    const power = rows.map(r => r.power);
+    const ntc = rows.map(r => r.ntc);
+    const cpu = rows.map(r => r.cpu);
+    const mos = rows.map(r => r.mos);
+
+    const lastWithMah = [...rows].reverse().find(r => Number.isFinite(r.mah));
+    const lastWithWh = [...rows].reverse().find(r => Number.isFinite(r.wh));
+
+    const capacity = lastWithMah ? lastWithMah.mah : NaN;
+    const energy = lastWithWh ? lastWithWh.wh : NaN;
+    const peakCurrent = max(dischargeCurrent);
+    const peakPower = max(power);
+    const maxNtc = max(ntc);
+    const maxMos = max(mos);
+    const maxCpu = max(cpu);
+    const duration = rows[rows.length - 1].tMin;
+
+    // Estimate the main discharge-current plateau, excluding startup/shutdown.
+    const loaded = dischargeCurrent.filter(a => a >= peakCurrent * 0.7);
+    const avgCurrent = loaded.length
+      ? loaded.reduce((a,b) => a+b, 0) / loaded.length
+      : NaN;
+
+    document.getElementById("resultGrid").innerHTML =
+      renderResult("Measured capacity", `${fmt(capacity, 0)} mAh`) +
+      renderResult("Measured energy", `${fmt(energy, 1)} Wh`) +
+      renderResult("Average loaded current", `${fmt(avgCurrent, 1)} A`) +
+      renderResult("Peak current", `${fmt(peakCurrent, 1)} A`) +
+      renderResult("Peak power", `${fmt(peakPower, 0)} W`) +
+      renderResult("Test duration", `${fmt(duration, 2)} min`) +
+      renderResult("Maximum probe temperature", `${fmt(maxNtc, 1)} °C`) +
+      renderResult("Maximum MOS temperature", `${fmt(maxMos, 1)} °C`) +
+      renderResult("Maximum CPU temperature", `${fmt(maxCpu, 1)} °C`);
+
+    Plotly.newPlot("voltageChart", [{
+      x: t, y: voltage, type: "scatter", mode: "lines",
+      name: "Pack voltage",
+      hovertemplate: "%{x:.2f} min<br>%{y:.3f} V<extra></extra>"
+    }], baseLayout("Voltage (V)"), plotConfig);
+
+    Plotly.newPlot("currentChart", [{
+      x: t, y: dischargeCurrent, type: "scatter", mode: "lines",
+      name: "Discharge current",
+      hovertemplate: "%{x:.2f} min<br>%{y:.2f} A<extra></extra>"
+    }], baseLayout("Current (A)"), plotConfig);
+
+    Plotly.newPlot("powerChart", [{
+      x: t, y: power, type: "scatter", mode: "lines",
+      name: "Power",
+      hovertemplate: "%{x:.2f} min<br>%{y:.1f} W<extra></extra>"
+    }], baseLayout("Power (W)"), plotConfig);
+
+    const tempTraces = [];
+    if (ntc.some(Number.isFinite)) {
+      tempTraces.push({
+        x: t, y: ntc, type: "scatter", mode: "lines",
+        name: "Probe",
+        hovertemplate: "%{x:.2f} min<br>%{y:.1f} °C<extra></extra>"
+      });
+    }
+    if (cpu.some(Number.isFinite)) {
+      tempTraces.push({
+        x: t, y: cpu, type: "scatter", mode: "lines",
+        name: "CPU",
+        hovertemplate: "%{x:.2f} min<br>%{y:.1f} °C<extra></extra>"
+      });
+    }
+    if (mos.some(Number.isFinite)) {
+      tempTraces.push({
+        x: t, y: mos, type: "scatter", mode: "lines",
+        name: "MOS",
+        hovertemplate: "%{x:.2f} min<br>%{y:.1f} °C<extra></extra>"
+      });
+    }
+
+    Plotly.newPlot("tempChart", tempTraces, baseLayout("Temperature (°C)"), plotConfig);
+
+  } catch (err) {
+    document.getElementById("resultGrid").innerHTML =
+      renderResult("Status", "Could not load test data");
+
+    const box = document.getElementById("errorBox");
+    box.style.display = "block";
+    box.textContent =
+      err.message +
+      "\n\nMake sure the CSV exists in this GitHub folder and that the URL uses ?test=filename";
+  }
+}
+
+loadTest();
+</script>
+</body>
+</html>
