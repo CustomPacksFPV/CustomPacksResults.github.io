@@ -131,6 +131,11 @@
   </div>
 
   <div class="card">
+    <h2>Pack temperature</h2>
+    <div id="tempChart" class="chart"></div>
+  </div>
+
+  <div class="card">
     <h2>Current</h2>
     <div id="currentChart" class="chart"></div>
   </div>
@@ -140,10 +145,6 @@
     <div id="powerChart" class="chart"></div>
   </div>
 
-  <div class="card">
-    <h2>Temperature</h2>
-    <div id="tempChart" class="chart"></div>
-  </div>
 
   <div class="card">
     <h2>Raw data</h2>
@@ -527,9 +528,7 @@ async function loadTest() {
       renderResult("Peak current", `${fmt(peakCurrent, 1)} A`) +
       renderResult("Peak power", `${fmt(peakPower, 0)} W`) +
       renderResult("Test duration", `${fmt(duration, 2)} min`) +
-      renderResult("Maximum probe temperature", `${fmt(maxNtc, 1)} °C`) +
-      renderResult("Maximum MOS temperature", `${fmt(maxMos, 1)} °C`) +
-      renderResult("Maximum CPU temperature", `${fmt(maxCpu, 1)} °C`);
+      renderResult("Maximum pack temperature", `${fmt(maxNtc, 1)} °C`);
 
     Plotly.newPlot("voltageChart", [{
       x: t, y: voltage, type: "scatter", mode: "lines",
@@ -553,21 +552,7 @@ async function loadTest() {
     if (ntc.some(Number.isFinite)) {
       tempTraces.push({
         x: t, y: ntc, type: "scatter", mode: "lines",
-        name: "Probe",
-        hovertemplate: "%{x:.2f} min<br>%{y:.1f} °C<extra></extra>"
-      });
-    }
-    if (cpu.some(Number.isFinite)) {
-      tempTraces.push({
-        x: t, y: cpu, type: "scatter", mode: "lines",
-        name: "CPU",
-        hovertemplate: "%{x:.2f} min<br>%{y:.1f} °C<extra></extra>"
-      });
-    }
-    if (mos.some(Number.isFinite)) {
-      tempTraces.push({
-        x: t, y: mos, type: "scatter", mode: "lines",
-        name: "MOS",
+        name: "Pack temp",
         hovertemplate: "%{x:.2f} min<br>%{y:.1f} °C<extra></extra>"
       });
     }
