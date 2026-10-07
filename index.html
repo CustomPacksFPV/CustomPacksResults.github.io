@@ -166,7 +166,7 @@ const testName = (params.get("test") || "test").trim();
 const csvFile = testName.toLowerCase().endsWith(".csv") ? testName : `${testName}.csv`;
 
 const PACK = {
-  packId: "CP-0001",
+ packId: params.get("id") || "CP-0001",
   cell: "Ampace JP40",
   configuration: "6S3P",
   ratedCapacity: "12,000 mAh",
