@@ -170,161 +170,196 @@ function parseFilenameMeta(filename) {
   const stem = (filename || "").replace(/\.csv$/i, "").trim();
   const tokens = stem.split(/\s+/).filter(Boolean);
 
-  // First word becomes owner/name for Pack ID
   const owner = tokens[0] || "Pack";
 
-  // Find config like 6S3P
-  const configToken = tokens.find(t => /^\d+S\d+P$/i.test(t)) || "";
-  const configMatch = configToken.match(/^(\d+)S(\d+)P$/i);
-  const seriesCount = configMatch ? Number(configMatch[1]) : 0;
-  const parallelCount = configMatch ? Number(configMatch[2]) : 0;
-
-  // Cell token = token immediately after config, e.g. Juan 6S3P JP40 50A
-  let cellCode = "";
   const configIndex = tokens.findIndex(t => /^\d+S\d+P$/i.test(t));
-  if (configIndex >= 0 && tokens[configIndex + 1]) {
-    cellCode = tokens[configIndex + 1];
-  }
+  const config = configIndex >= 0 ? tokens[configIndex].toUpperCase() : "";
+  const configMatch = config.match(/^(\d+)S(\d+)P$/i);
+  const series = configMatch ? Number(configMatch[1]) : 0;
+  const parallel = configMatch ? Number(configMatch[2]) : 0;
 
-  // Optional standalone pack number after cell code, before current token.
-  // e.g. "Outback 6S1P 50XG 2 50A" => pack #002
-  let packNo = 1;
+  // Assumes the cell code comes directly after the configuration:
+  // Juan 6S3P JP40 50A.csv
+  const cellCode = (configIndex >= 0 && tokens[configIndex + 1])
+    ? tokens[configIndex + 1]
+    : "";
+
+  // Optional standalone pack number after the cell code:
+  // Outback 6S1P 50XG 2 50A.csv -> Outback-002
+  let packNumber = 1;
   if (configIndex >= 0) {
     for (let i = configIndex + 2; i < tokens.length; i++) {
       if (/^\d+$/.test(tokens[i])) {
-        packNo = Number(tokens[i]);
+        packNumber = Number(tokens[i]);
         break;
       }
     }
   }
 
-  // Test current from token like 50A / 75A
   const currentToken = [...tokens].reverse().find(t => /^\d+(?:\.\d+)?A$/i.test(t));
-  const testCurrentA = currentToken ? Number(currentToken.replace(/A$/i, "")) : null;
+  const testCurrent = currentToken ? Number(currentToken.replace(/A$/i, "")) : null;
 
   return {
-    stem,
     owner,
-    packNo,
-    packId: `${owner}-${String(packNo).padStart(3, "0")}`,
-    configuration: configToken.toUpperCase(),
-    seriesCount,
-    parallelCount,
+    config,
+    series,
+    parallel,
     cellCode,
-    testCurrentA
+    packNumber,
+    packId: `${owner}-${String(packNumber).padStart(3, "0")}`,
+    testCurrent
   };
 }
 
-const autoMeta = parseFilenameMeta(csvFile || testName);
+const META = parseFilenameMeta(csvFile);
 
-// Placeholder until the cell JSON loads.
 let PACK = {
-  packId: params.get("id") || autoMeta.packId,
-  cell: autoMeta.cellCode || "—",
-  configuration: autoMeta.configuration || "—",
-  ratedCapacity: "Loading…",
-  nominalVoltage: "Loading…",
-  nominalEnergy: "Loading…",
-  continuousDischarge: "Loading…",
-  chargeVoltage: "Loading…",
-  notes: autoMeta.testCurrentA ? `${autoMeta.testCurrentA} A discharge test` : ""
+  packId: META.packId,
+  cell: META.cellCode || "—",
+  configuration: META.config || "—",
+  ratedCapacity: "—",
+  nominalVoltage: "—",
+  nominalEnergy: "—",
+  continuousDischarge: "—",
+  chargeVoltage: "—",
+  notes: META.testCurrent ? `${META.testCurrent} A discharge test` : ""
 };
 
+function addSpec(label, value) {
+  if (!value) return "";
+  return `<div class="item"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+}
+
+function renderPackSpecs() {
+  document.getElementById("specGrid").innerHTML =
+    addSpec("Pack ID", PACK.packId) +
+    addSpec("Cell", PACK.cell) +
+    addSpec("Configuration", PACK.configuration) +
+    addSpec("Rated capacity", PACK.ratedCapacity) +
+    addSpec("Nominal voltage", PACK.nominalVoltage) +
+    addSpec("Nominal energy", PACK.nominalEnergy) +
+    addSpec("Continuous discharge", PACK.continuousDischarge) +
+    addSpec("Charge voltage", PACK.chargeVoltage);
+}
+
 async function loadCellSpecs() {
-  if (!autoMeta.cellCode) {
-    throw new Error("No cell code found in filename. Expected format like: Juan 6S3P JP40 50A.csv");
+  if (!META.cellCode) {
+    renderPackSpecs();
+    return;
   }
 
-  const specPath = `cells/${encodeURIComponent(autoMeta.cellCode)}.json`;
-  const res = await fetch(specPath, { cache: "no-store" });
+  // JSON files are in the repository root, e.g. JP40.json / 50XG.json
+  const specFile = `${META.cellCode}.json`;
+  const res = await fetch(encodeURI(specFile), { cache: "no-store" });
 
   if (!res.ok) {
-    throw new Error(`Could not load ${specPath} (HTTP ${res.status})`);
+    console.warn(`Could not load ${specFile}: HTTP ${res.status}`);
+    renderPackSpecs();
+    return;
   }
 
   const spec = await res.json();
 
-  // Support a few sensible field-name variants.
-  const cellName =
+  // Flexible field names so your JSON doesn't have to be exact.
+  const name =
     spec.name ??
     spec.cell_name ??
+    spec.cell ??
     spec.model ??
-    autoMeta.cellCode;
+    META.cellCode;
 
-  const cellCapacityMah =
-    Number(spec.capacity_mAh ?? spec.capacity_mah ?? spec.capacity ?? 0);
+  const capacityMah = Number(
+    spec.capacity_mAh ??
+    spec.capacity_mah ??
+    spec.capacityMah ??
+    spec.capacity ??
+    0
+  );
 
-  const nominalCellVoltage =
-    Number(spec.nominal_voltage ?? spec.nominal_voltage_v ?? 3.6);
+  const nominalCellV = Number(
+    spec.nominal_voltage ??
+    spec.nominalVoltage ??
+    spec.nominal_voltage_v ??
+    3.6
+  );
 
-  const maxCellVoltage =
-    Number(spec.max_voltage ?? spec.charge_voltage ?? spec.max_charge_voltage ?? 4.2);
+  const maxCellV = Number(
+    spec.max_voltage ??
+    spec.maxVoltage ??
+    spec.charge_voltage ??
+    spec.chargeVoltage ??
+    4.2
+  );
 
-  let continuousA = null;
+  let cdr = null;
 
-  if (spec.cdr_by_parallel && typeof spec.cdr_by_parallel === "object") {
-    const value = spec.cdr_by_parallel[String(autoMeta.parallelCount)];
-    if (value !== undefined) continuousA = Number(value);
+  // Preferred format:
+  // "cdr_by_parallel": {"1":40,"2":60,"3":80}
+  const cdrMap =
+    spec.cdr_by_parallel ??
+    spec.cdrByParallel ??
+    spec.continuous_by_parallel ??
+    spec.continuousByParallel;
+
+  if (cdrMap && typeof cdrMap === "object") {
+    const v = cdrMap[String(META.parallel)];
+    if (v !== undefined && v !== null) cdr = Number(v);
   }
 
-  // Optional fallback if JSON only provides a per-cell CDR.
-  if (!Number.isFinite(continuousA)) {
-    const perCellCdr = Number(spec.cdr_A ?? spec.cdr_a ?? spec.cdr ?? 0);
-    if (perCellCdr > 0 && autoMeta.parallelCount > 0) {
-      continuousA = perCellCdr * autoMeta.parallelCount;
-    }
+  // Fallback: per-cell CDR multiplied by P count.
+  if (!Number.isFinite(cdr)) {
+    const perCell = Number(
+      spec.cdr_A ??
+      spec.cdr_a ??
+      spec.cdr ??
+      spec.continuous_discharge_A ??
+      0
+    );
+    if (perCell > 0 && META.parallel > 0) cdr = perCell * META.parallel;
   }
 
-  const ratedCapacityMah =
-    cellCapacityMah > 0 && autoMeta.parallelCount > 0
-      ? cellCapacityMah * autoMeta.parallelCount
+  const packCapacityMah =
+    capacityMah > 0 && META.parallel > 0
+      ? capacityMah * META.parallel
       : null;
 
-  const nominalPackVoltage =
-    nominalCellVoltage > 0 && autoMeta.seriesCount > 0
-      ? nominalCellVoltage * autoMeta.seriesCount
+  const nominalPackV =
+    nominalCellV > 0 && META.series > 0
+      ? nominalCellV * META.series
       : null;
 
-  const chargePackVoltage =
-    maxCellVoltage > 0 && autoMeta.seriesCount > 0
-      ? maxCellVoltage * autoMeta.seriesCount
+  const chargePackV =
+    maxCellV > 0 && META.series > 0
+      ? maxCellV * META.series
       : null;
 
   const nominalWh =
-    ratedCapacityMah && nominalPackVoltage
-      ? nominalPackVoltage * (ratedCapacityMah / 1000)
+    packCapacityMah && nominalPackV
+      ? nominalPackV * (packCapacityMah / 1000)
       : null;
 
   PACK = {
-    packId: params.get("id") || autoMeta.packId,
-    cell: cellName,
-    configuration: autoMeta.configuration || "—",
-    ratedCapacity: ratedCapacityMah ? `${ratedCapacityMah.toLocaleString()} mAh` : "—",
-    nominalVoltage: nominalPackVoltage ? `${nominalPackVoltage.toFixed(1)} V` : "—",
+    packId: META.packId,
+    cell: name,
+    configuration: META.config || "—",
+    ratedCapacity: packCapacityMah ? `${packCapacityMah.toLocaleString()} mAh` : "—",
+    nominalVoltage: nominalPackV ? `${nominalPackV.toFixed(1)} V` : "—",
     nominalEnergy: nominalWh ? `${Math.round(nominalWh)} Wh` : "—",
-    continuousDischarge: Number.isFinite(continuousA) ? `${continuousA} A` : "—",
-    chargeVoltage: chargePackVoltage ? `${chargePackVoltage.toFixed(1)} V` : "—",
-    notes: autoMeta.testCurrentA ? `${autoMeta.testCurrentA} A discharge test` : ""
+    continuousDischarge: Number.isFinite(cdr) ? `${cdr} A` : "—",
+    chargeVoltage: chargePackV ? `${chargePackV.toFixed(1)} V` : "—",
+    notes: META.testCurrent ? `${META.testCurrent} A discharge test` : ""
   };
-}
 
-function renderPackSpecs() {
-  
-async function initPackDetails() {
-  try {
-    await loadCellSpecs();
-  } catch (err) {
-    console.warn(err);
-    PACK.ratedCapacity = "—";
-    PACK.nominalVoltage = "—";
-    PACK.nominalEnergy = "—";
-    PACK.continuousDischarge = "—";
-    PACK.chargeVoltage = "—";
-  }
   renderPackSpecs();
 }
 
+document.title = `CustomPacksFPV - ${testName}`;
+document.getElementById("testLabel").textContent = testName;
+document.getElementById("csvDownload").href = csvFile;
+document.getElementById("csvDownload").setAttribute("download", csvFile);
 
+renderPackSpecs();
+loadCellSpecs();
 
 function parseCSVLine(line) {
   // ATORCH files used here do not contain quoted commas in data fields.
@@ -551,7 +586,6 @@ async function loadTest() {
   }
 }
 
-initPackDetails();
 loadTest();
 </script>
 </body>
