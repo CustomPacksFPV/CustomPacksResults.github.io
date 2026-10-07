@@ -1,0 +1,10 @@
+{
+  "name": "Ampace JP40",
+  "capacity_mAh": 4000,
+  "nominal_voltage": 3.6,
+  "cdr_by_parallel": {
+    "1": 40,
+    "2": 60,
+    "3": 80
+  }
+}
