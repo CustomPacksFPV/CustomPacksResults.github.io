@@ -94,56 +94,6 @@
       font-size: 13px;
     }
 
-    .picker-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 12px;
-    }
-    .picker-row input, .picker-row select {
-      width: 100%;
-      background: #0d1117;
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 12px;
-      font: inherit;
-    }
-    .picker-actions {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-top: 14px;
-    }
-    button {
-      background: #238636;
-      color: white;
-      border: 0;
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    button.secondary {
-      background: #21262d;
-      border: 1px solid var(--border);
-    }
-    .test-list {
-      display: grid;
-      gap: 8px;
-      margin-top: 12px;
-    }
-    .test-link {
-      display: block;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 12px;
-      color: var(--text);
-      text-decoration: none;
-      background: #0d1117;
-    }
-    .test-link:hover { border-color: var(--accent); }
-
     footer {
       margin-top: 26px;
       color: var(--muted);
@@ -161,24 +111,7 @@
 <body>
 <div class="wrap">
   <h1>CustomPacksFPV</h1>
-  <div class="subtitle" id="subtitle">Individual battery test results <span id="testSuffix"></span></div>
-
-  <div id="pickerCard" class="card" style="display:none">
-    <h2>Open a battery test</h2>
-    <div>
-      <div class="label">Test CSV</div>
-      <select id="testSelect" style="width:100%;background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font:inherit;"></select>
-    </div>
-
-    <div class="picker-actions">
-      <button id="openBtn">Open test</button>
-      <button id="copyBtn" class="secondary">Copy customer link</button>
-    </div>
-
-    <div id="pickerStatus" class="small" style="margin-top:12px"></div>
-  </div></div>
-
-  <div id="resultsContent">
+  <div class="subtitle">Individual battery test results — <span id="testLabel"></span></div>
 
   <div class="card">
     <h2>Pack details</h2>
@@ -220,7 +153,6 @@
 
   <div id="errorBox" class="card error" style="display:none"></div>
 
-  </div>
   <footer>CustomPacksFPV battery test record</footer>
 </div>
 
@@ -230,88 +162,27 @@
   Everything under "Measured results" is calculated automatically from test.csv.
 */
 const params = new URLSearchParams(window.location.search);
-const rawTestParam = params.get("test");
-const testName = rawTestParam ? rawTestParam.trim() : "";
-const csvFile = testName
-  ? (testName.toLowerCase().endsWith(".csv") ? testName : `${testName}.csv`)
-  : "";
+const testName = (params.get("test") || "test").trim();
+const csvFile = testName.toLowerCase().endsWith(".csv") ? testName : `${testName}.csv`;
 
-function parseFilenameMeta(filename) {
-  const stem = (filename || "").replace(/\.csv$/i, "").trim();
-  const tokens = stem.split(/\s+/).filter(Boolean);
-
-  const owner = tokens[0] || "Pack";
-
-  // Explicit pack number: standalone integer token, e.g. "... 2 50A" => 002.
-  // Ignore numbers embedded in tokens like 6S1P, 50XG, 50A.
-  let packNo = 1;
-  for (let i = 1; i < tokens.length; i++) {
-    if (/^\d+$/.test(tokens[i])) {
-      packNo = Number(tokens[i]);
-      break;
-    }
-  }
-
-  const configToken = tokens.find(t => /^\d+S\d+P$/i.test(t)) || "6S1P";
-  const cellToken = tokens.find(t =>
-    /^(JP30|JP40|50XG|60P|65P|RS50|50PL|P45B|P50B)$/i.test(t)
-  ) || "Unknown";
-
-  const seriesMatch = configToken.match(/^(\d+)S(\d+)P$/i);
-  const seriesCount = seriesMatch ? Number(seriesMatch[1]) : 6;
-  const parallelCount = seriesMatch ? Number(seriesMatch[2]) : 1;
-
-  const cellCapacityMap = {
-    "JP30": 3000,
-    "JP40": 4000,
-    "50XG": 5000,
-    "60P": 6000,
-    "65P": 6500,
-    "RS50": 5000,
-    "50PL": 5000,
-    "P45B": 4500,
-    "P50B": 5000
-  };
-
-  const cellCapacity = cellCapacityMap[cellToken.toUpperCase()] || null;
-  const ratedCapacityMah = cellCapacity ? cellCapacity * parallelCount : null;
-
-  // Last token like 50A / 75A is treated as the test current, not pack continuous rating.
-  const currentToken = [...tokens].reverse().find(t => /^\d+(?:\.\d+)?A$/i.test(t));
-  const testCurrentA = currentToken ? Number(currentToken.replace(/A$/i, "")) : null;
-
-  return {
-    owner,
-    packNo,
-    packId: `${owner}-${String(packNo).padStart(3, "0")}`,
-    configuration: configToken.toUpperCase(),
-    cell: cellToken.toUpperCase(),
-    seriesCount,
-    parallelCount,
-    ratedCapacityMah,
-    testCurrentA
-  };
-}
-
-const autoMeta = parseFilenameMeta(csvFile || testName);
-const configParam = params.get("config") || autoMeta.configuration;
-const capacityMah = Number(params.get("capacity") || autoMeta.ratedCapacityMah || 0);
+const configParam = params.get("config") || "6S3P";
+const capacityMah = Number(params.get("capacity") || 12000);
 const seriesMatch = configParam.match(/(\d+)S/i);
-const seriesCount = seriesMatch ? Number(seriesMatch[1]) : autoMeta.seriesCount;
+const seriesCount = seriesMatch ? Number(seriesMatch[1]) : 6;
 const nominalVoltageNum = seriesCount * 3.6;
 const chargeVoltageNum = seriesCount * 4.2;
-const nominalEnergyNum = capacityMah > 0 ? nominalVoltageNum * (capacityMah / 1000) : null;
+const nominalEnergyNum = nominalVoltageNum * (capacityMah / 1000);
 
 const PACK = {
-  packId: params.get("id") || autoMeta.packId,
-  cell: params.get("cell") || autoMeta.cell,
+  packId: params.get("id") || "CP-0001",
+  cell: params.get("cell") || "Ampace JP40",
   configuration: configParam,
-  ratedCapacity: capacityMah > 0 ? `${capacityMah.toLocaleString()} mAh` : "—",
+  ratedCapacity: `${capacityMah.toLocaleString()} mAh`,
   nominalVoltage: `${nominalVoltageNum.toFixed(1)} V`,
-  nominalEnergy: nominalEnergyNum !== null ? `${Math.round(nominalEnergyNum)} Wh` : "—",
-  continuousDischarge: params.get("cont") ? `${params.get("cont")} A` : "—",
+  nominalEnergy: `${Math.round(nominalEnergyNum)} Wh`,
+  continuousDischarge: `${params.get("cont") || 80} A`,
   chargeVoltage: `${chargeVoltageNum.toFixed(1)} V`,
-  notes: autoMeta.testCurrentA ? `${autoMeta.testCurrentA} A discharge test` : ""
+  notes: params.get("notes") || ""
 };
 
 function addSpec(label, value) {
@@ -319,12 +190,10 @@ function addSpec(label, value) {
   return `<div class="item"><div class="label">${label}</div><div class="value">${value}</div></div>`;
 }
 
-document.title = testName ? `CustomPacksFPV - ${testName}` : "CustomPacksFPV Battery Tests";
-if (testName) {
-  document.getElementById("testSuffix").textContent = `— ${testName}`;
-  document.getElementById("csvDownload").href = csvFile;
-  document.getElementById("csvDownload").setAttribute("download", csvFile);
-}
+document.title = `CustomPacksFPV - ${testName}`;
+document.getElementById("testLabel").textContent = testName;
+document.getElementById("csvDownload").href = csvFile;
+document.getElementById("csvDownload").setAttribute("download", csvFile);
 
 document.getElementById("specGrid").innerHTML =
   addSpec("Pack ID", PACK.packId) +
@@ -388,69 +257,6 @@ function baseLayout(yTitle) {
     },
     hovermode: "x unified",
     legend: {orientation: "h", y: 1.08}
-  };
-}
-
-
-const OWNER = "CustomPacksFPV";
-const REPO = "CustomPacksResults.github.io";
-
-function buildCustomerUrl() {
-  const file = document.getElementById("testSelect").value;
-  if (!file) return "";
-
-  const u = new URL(window.location.origin + window.location.pathname);
-  u.searchParams.set("test", file.replace(/\.csv$/i, ""));
-  u.searchParams.set("v", "picker2");
-  return u.toString();
-}
-
-async function initPicker() {
-  document.getElementById("pickerCard").style.display = "block";
-  document.getElementById("resultsContent").style.display = "none";
-  document.getElementById("testSuffix").textContent = "";
-
-  const select = document.getElementById("testSelect");
-  const status = document.getElementById("pickerStatus");
-  status.textContent = "Loading CSV files from GitHub…";
-
-  try {
-    const res = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/contents/`, {
-      headers: { "Accept": "application/vnd.github+json" },
-      cache: "no-store"
-    });
-    if (!res.ok) throw new Error(`GitHub API returned HTTP ${res.status}`);
-    const files = await res.json();
-    const csvs = files
-      .filter(x => x.type === "file" && /\.csv$/i.test(x.name))
-      .map(x => x.name)
-      .sort((a,b) => a.localeCompare(b));
-
-    select.innerHTML = csvs.map(name =>
-      `<option value="${name.replace(/"/g, "&quot;")}">${name}</option>`
-    ).join("");
-
-    status.textContent = csvs.length
-      ? `${csvs.length} test file${csvs.length === 1 ? "" : "s"} found.`
-      : "No CSV files found in the repository root.";
-  } catch (err) {
-    status.textContent = `Could not list tests automatically: ${err.message}`;
-  }
-
-  document.getElementById("openBtn").onclick = () => {
-    const url = buildCustomerUrl();
-    if (url) window.location.href = url;
-  };
-
-  document.getElementById("copyBtn").onclick = async () => {
-    const url = buildCustomerUrl();
-    if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
-      status.textContent = "Customer link copied.";
-    } catch {
-      status.textContent = url;
-    }
   };
 }
 
@@ -624,11 +430,7 @@ async function loadTest() {
   }
 }
 
-if (testName) {
-  loadTest();
-} else {
-  initPicker();
-}
+loadTest();
 </script>
 </body>
 </html>
