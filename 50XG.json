@@ -1,0 +1,11 @@
+{
+  "name": "Tenpower 50XG",
+  "capacity_mAh": 5000,
+  "nominal_voltage": 3.6,
+  "max_voltage": 4.2,
+  "cdr_by_parallel": {
+    "1": 40,
+    "2": 60,
+    "3": 80
+  }
+}
