@@ -165,39 +165,9 @@
 
   <div id="pickerCard" class="card" style="display:none">
     <h2>Open a battery test</h2>
-    <p class="small">Choose a CSV already uploaded to this GitHub repository, enter the pack details, then open or copy the customer link.</p>
-
-    <div class="picker-row">
-      <div>
-        <div class="label">Test CSV</div>
-        <select id="testSelect"></select>
-      </div>
-      <div>
-        <div class="label">Pack ID</div>
-        <input id="packIdInput" placeholder="e.g. Juan-001">
-      </div>
-    </div>
-
-    <div class="picker-row">
-      <div>
-        <div class="label">Cell</div>
-        <input id="cellInput" placeholder="e.g. 50XG">
-      </div>
-      <div>
-        <div class="label">Configuration</div>
-        <input id="configInput" placeholder="e.g. 6S1P">
-      </div>
-    </div>
-
-    <div class="picker-row">
-      <div>
-        <div class="label">Rated capacity (mAh)</div>
-        <input id="capacityInput" type="number" placeholder="e.g. 5000">
-      </div>
-      <div>
-        <div class="label">Continuous discharge (A)</div>
-        <input id="contInput" type="number" placeholder="e.g. 50">
-      </div>
+    <div>
+      <div class="label">Test CSV</div>
+      <select id="testSelect" style="width:100%;background:#0d1117;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font:inherit;"></select>
     </div>
 
     <div class="picker-actions">
@@ -206,7 +176,7 @@
     </div>
 
     <div id="pickerStatus" class="small" style="margin-top:12px"></div>
-  </div>
+  </div></div>
 
   <div id="resultsContent">
 
@@ -266,24 +236,82 @@ const csvFile = testName
   ? (testName.toLowerCase().endsWith(".csv") ? testName : `${testName}.csv`)
   : "";
 
-const configParam = params.get("config") || "6S3P";
-const capacityMah = Number(params.get("capacity") || 12000);
+function parseFilenameMeta(filename) {
+  const stem = (filename || "").replace(/\.csv$/i, "").trim();
+  const tokens = stem.split(/\s+/).filter(Boolean);
+
+  const owner = tokens[0] || "Pack";
+
+  // Explicit pack number: standalone integer token, e.g. "... 2 50A" => 002.
+  // Ignore numbers embedded in tokens like 6S1P, 50XG, 50A.
+  let packNo = 1;
+  for (let i = 1; i < tokens.length; i++) {
+    if (/^\d+$/.test(tokens[i])) {
+      packNo = Number(tokens[i]);
+      break;
+    }
+  }
+
+  const configToken = tokens.find(t => /^\d+S\d+P$/i.test(t)) || "6S1P";
+  const cellToken = tokens.find(t =>
+    /^(JP30|JP40|50XG|60P|65P|RS50|50PL|P45B|P50B)$/i.test(t)
+  ) || "Unknown";
+
+  const seriesMatch = configToken.match(/^(\d+)S(\d+)P$/i);
+  const seriesCount = seriesMatch ? Number(seriesMatch[1]) : 6;
+  const parallelCount = seriesMatch ? Number(seriesMatch[2]) : 1;
+
+  const cellCapacityMap = {
+    "JP30": 3000,
+    "JP40": 4000,
+    "50XG": 5000,
+    "60P": 6000,
+    "65P": 6500,
+    "RS50": 5000,
+    "50PL": 5000,
+    "P45B": 4500,
+    "P50B": 5000
+  };
+
+  const cellCapacity = cellCapacityMap[cellToken.toUpperCase()] || null;
+  const ratedCapacityMah = cellCapacity ? cellCapacity * parallelCount : null;
+
+  // Last token like 50A / 75A is treated as the test current, not pack continuous rating.
+  const currentToken = [...tokens].reverse().find(t => /^\d+(?:\.\d+)?A$/i.test(t));
+  const testCurrentA = currentToken ? Number(currentToken.replace(/A$/i, "")) : null;
+
+  return {
+    owner,
+    packNo,
+    packId: `${owner}-${String(packNo).padStart(3, "0")}`,
+    configuration: configToken.toUpperCase(),
+    cell: cellToken.toUpperCase(),
+    seriesCount,
+    parallelCount,
+    ratedCapacityMah,
+    testCurrentA
+  };
+}
+
+const autoMeta = parseFilenameMeta(csvFile || testName);
+const configParam = params.get("config") || autoMeta.configuration;
+const capacityMah = Number(params.get("capacity") || autoMeta.ratedCapacityMah || 0);
 const seriesMatch = configParam.match(/(\d+)S/i);
-const seriesCount = seriesMatch ? Number(seriesMatch[1]) : 6;
+const seriesCount = seriesMatch ? Number(seriesMatch[1]) : autoMeta.seriesCount;
 const nominalVoltageNum = seriesCount * 3.6;
 const chargeVoltageNum = seriesCount * 4.2;
-const nominalEnergyNum = nominalVoltageNum * (capacityMah / 1000);
+const nominalEnergyNum = capacityMah > 0 ? nominalVoltageNum * (capacityMah / 1000) : null;
 
 const PACK = {
-  packId: params.get("id") || "CP-0001",
-  cell: params.get("cell") || "Ampace JP40",
+  packId: params.get("id") || autoMeta.packId,
+  cell: params.get("cell") || autoMeta.cell,
   configuration: configParam,
-  ratedCapacity: `${capacityMah.toLocaleString()} mAh`,
+  ratedCapacity: capacityMah > 0 ? `${capacityMah.toLocaleString()} mAh` : "—",
   nominalVoltage: `${nominalVoltageNum.toFixed(1)} V`,
-  nominalEnergy: `${Math.round(nominalEnergyNum)} Wh`,
-  continuousDischarge: `${params.get("cont") || 80} A`,
+  nominalEnergy: nominalEnergyNum !== null ? `${Math.round(nominalEnergyNum)} Wh` : "—",
+  continuousDischarge: params.get("cont") ? `${params.get("cont")} A` : "—",
   chargeVoltage: `${chargeVoltageNum.toFixed(1)} V`,
-  notes: params.get("notes") || ""
+  notes: autoMeta.testCurrentA ? `${autoMeta.testCurrentA} A discharge test` : ""
 };
 
 function addSpec(label, value) {
@@ -373,21 +401,7 @@ function buildCustomerUrl() {
 
   const u = new URL(window.location.origin + window.location.pathname);
   u.searchParams.set("test", file.replace(/\.csv$/i, ""));
-
-  const id = document.getElementById("packIdInput").value.trim();
-  const cell = document.getElementById("cellInput").value.trim();
-  const config = document.getElementById("configInput").value.trim();
-  const capacity = document.getElementById("capacityInput").value.trim();
-  const cont = document.getElementById("contInput").value.trim();
-
-  if (id) u.searchParams.set("id", id);
-  if (cell) u.searchParams.set("cell", cell);
-  if (config) u.searchParams.set("config", config);
-  if (capacity) u.searchParams.set("capacity", capacity);
-  if (cont) u.searchParams.set("cont", cont);
-
-  // Cache-buster so GitHub Pages/browser fetches the latest HTML.
-  u.searchParams.set("v", "picker1");
+  u.searchParams.set("v", "picker2");
   return u.toString();
 }
 
